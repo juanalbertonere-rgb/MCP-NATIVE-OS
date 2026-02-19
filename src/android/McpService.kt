@@ -15,11 +15,14 @@ class McpBridgeService : Service() {
         connectToDaemon()
     }
 
+    private var socket: LocalSocket? = null
+
     private fun connectToDaemon() {
         try {
-            val socket = LocalSocket()
-            socket.connect(LocalSocketAddress("/tmp/mcpd.sock", LocalSocketAddress.Namespace.FILESYSTEM))
+            socket = LocalSocket()
+            socket?.connect(LocalSocketAddress("/tmp/mcpd.sock", LocalSocketAddress.Namespace.FILESYSTEM))
             Log.i("McpService", "Bridge established: Android Services <-> mcpd via /tmp/mcpd.sock")
+            registerAndroidTools()
         } catch (e: Exception) {
             Log.e("McpService", "Failed to connect to mcpd: ${e.message}")
         }
@@ -40,7 +43,29 @@ class McpBridgeService : Service() {
         )
         tools.forEach { tool ->
             Log.i("McpService", "Registering Android capability: $tool")
-            // In a real implementation, this would send a registration request over the UDS socket
+            sendRegistrationRequest(tool)
+        }
+    }
+
+    private fun sendRegistrationRequest(toolName: String) {
+        try {
+            val request = """
+                {
+                    "jsonrpc": "2.0",
+                    "method": "system.register_tool",
+                    "params": {
+                        "name": "$toolName",
+                        "provider": "android.system",
+                        "risk_level": "Medium"
+                    },
+                    "id": ${System.currentTimeMillis()}
+                }
+            """.trimIndent().replace("\n", "") + "\n"
+
+            socket?.outputStream?.write(request.toByteArray())
+            socket?.outputStream?.flush()
+        } catch (e: Exception) {
+            Log.e("McpService", "Failed to register tool $toolName: ${e.message}")
         }
     }
 }
