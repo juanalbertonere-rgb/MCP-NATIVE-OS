@@ -1,8 +1,4 @@
-pub enum RiskLevel {
-    Low,
-    Medium,
-    High,
-}
+use crate::common::RiskLevel;
 
 pub struct RiskAssessment {
     pub level: RiskLevel,
@@ -13,7 +9,7 @@ pub struct RiskAssessment {
 pub struct RiskEngine;
 
 impl RiskEngine {
-    pub fn assess(tool_name: &str, params: &serde_json::Value, context: &serde_json::Value) -> RiskAssessment {
+    pub fn assess(tool_name: &str, _params: &serde_json::Value, context: &serde_json::Value) -> RiskAssessment {
         // 1. Deterministic Layer
         let base_risk = match tool_name {
             "financial.transfer" | "system.factory_reset" | "file.delete_all" => RiskLevel::High,

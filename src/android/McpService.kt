@@ -2,6 +2,8 @@ package com.mcp.os.system
 
 import android.app.Service
 import android.content.Intent
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.os.IBinder
 import android.util.Log
 
@@ -14,8 +16,13 @@ class McpBridgeService : Service() {
     }
 
     private fun connectToDaemon() {
-        // Simulated UDS connection to Rust daemon
-        println("Bridge established: Android Services <-> mcpd")
+        try {
+            val socket = LocalSocket()
+            socket.connect(LocalSocketAddress("/tmp/mcpd.sock", LocalSocketAddress.Namespace.FILESYSTEM))
+            Log.i("McpService", "Bridge established: Android Services <-> mcpd via /tmp/mcpd.sock")
+        } catch (e: Exception) {
+            Log.e("McpService", "Failed to connect to mcpd: ${e.message}")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -26,9 +33,14 @@ class McpBridgeService : Service() {
      * Expose Android-specific capabilities as MCP tools
      */
     fun registerAndroidTools() {
-        // tools: [
-        //   { name: "android.contacts.search", handler: ::searchContacts },
-        //   { name: "android.sms.send", handler: ::sendSms }
-        // ]
+        val tools = listOf(
+            "camera.capture",
+            "contacts.resolve",
+            "messages.send"
+        )
+        tools.forEach { tool ->
+            Log.i("McpService", "Registering Android capability: $tool")
+            // In a real implementation, this would send a registration request over the UDS socket
+        }
     }
 }
