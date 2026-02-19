@@ -1,9 +1,29 @@
+import * as net from 'net';
+
 interface ToolCall {
     tool: string;
     args: any;
 }
 
-class AgentOrchestrator {
+export class AgentOrchestrator {
+    private client: net.Socket | null = null;
+
+    private async getClient(): Promise<net.Socket> {
+        if (this.client && !this.client.destroyed) {
+            return this.client;
+        }
+        return new Promise((resolve, reject) => {
+            const client = net.connect('/tmp/mcpd.sock', () => {
+                this.client = client;
+                resolve(client);
+            });
+            client.on('error', (err) => {
+                console.error('Socket error:', err);
+                reject(err);
+            });
+        });
+    }
+
     async processIntent(userInput: string) {
         console.log(`Processing intent: ${userInput}`);
 
@@ -13,6 +33,13 @@ class AgentOrchestrator {
         // 2. Execute
         for (const step of plan) {
             await this.executeStep(step);
+        }
+    }
+
+    async shutdown() {
+        if (this.client) {
+            this.client.end();
+            this.client = null;
         }
     }
 
@@ -28,10 +55,6 @@ class AgentOrchestrator {
     private async executeStep(step: ToolCall) {
         console.log(`Executing tool: ${step.tool}`);
 
-        // In a real mobile OS environment, this would use a Unix Domain Socket
-        // or a native IPC bridge rather than a standard HTTP fetch.
-        // For the prototype, we simulate the MCP request structure.
-
         const mcpRequest = {
             jsonrpc: "2.0",
             method: step.tool,
@@ -45,8 +68,17 @@ class AgentOrchestrator {
 
         console.log(`Sending MCP Request to mcpd: ${JSON.stringify(mcpRequest)}`);
 
-        // Simulated response
-        const result = { status: "success", data: "Sample tool output" };
-        console.log(`Tool Result: ${JSON.stringify(result)}`);
+        return new Promise<void>(async (resolve, reject) => {
+            try {
+                const client = await this.getClient();
+                client.once('data', (data) => {
+                    console.log(`Tool Result: ${data.toString()}`);
+                    resolve();
+                });
+                client.write(JSON.stringify(mcpRequest));
+            } catch (err) {
+                reject(err);
+            }
+        });
     }
 }

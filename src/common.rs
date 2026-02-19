@@ -1,3 +1,6 @@
+/**
+ * Shared definitions for the MCP System.
+ */
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
