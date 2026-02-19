@@ -1,0 +1,11 @@
+{
+  "name": "camera.capture",
+  "description": "Takes a photo using the primary device camera.",
+  "parameters": {
+    "flash": { "type": "boolean", "default": false },
+    "resolution": { "type": "string", "enum": ["high", "low"], "default": "high" }
+  },
+  "risk_category": "MEDIUM",
+  "capabilities_required": ["android.permission.CAMERA"],
+  "reversibility": "none"
+}

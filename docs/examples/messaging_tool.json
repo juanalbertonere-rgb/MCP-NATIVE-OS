@@ -1,0 +1,12 @@
+{
+  "name": "messages.send",
+  "description": "Sends a text message or multimedia message to a contact.",
+  "parameters": {
+    "recipient_id": { "type": "string", "description": "The unique ID or phone number of the recipient." },
+    "body": { "type": "string", "description": "The text content of the message." },
+    "attachments": { "type": "array", "items": { "type": "string" }, "description": "List of file URIs." }
+  },
+  "risk_category": "MEDIUM",
+  "capabilities_required": ["android.permission.SEND_SMS"],
+  "reversibility": "none"
+}
