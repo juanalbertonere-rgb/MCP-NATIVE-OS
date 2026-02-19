@@ -1,6 +1,3 @@
-/**
- * Shared definitions for the MCP System.
- */
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,4 +12,6 @@ pub struct Tool {
     pub name: String,
     pub provider: String,
     pub risk_level: RiskLevel,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }

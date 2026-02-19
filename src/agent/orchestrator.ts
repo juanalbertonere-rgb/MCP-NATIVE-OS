@@ -1,4 +1,5 @@
 import * as net from 'net';
+import * as readline from 'readline';
 
 interface ToolCall {
     tool: string;
@@ -9,6 +10,23 @@ export class AgentOrchestrator {
     private client: net.Socket | null = null;
     private pendingRequests: Map<number | string, { resolve: (data: any) => void, reject: (err: any) => void }> = new Map();
     private buffer: string = '';
+    private rl: readline.Interface;
+    private confirmationQueue: ((answer: boolean) => void)[] = [];
+
+    constructor() {
+        this.rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            terminal: false
+        });
+
+        this.rl.on('line', (line) => {
+            const resolve = this.confirmationQueue.shift();
+            if (resolve) {
+                resolve(line.trim().toLowerCase() === 'y');
+            }
+        });
+    }
 
     private async getClient(retries = 3): Promise<net.Socket> {
         if (this.client && !this.client.destroyed) {
@@ -91,6 +109,14 @@ export class AgentOrchestrator {
             this.client.end();
             this.client = null;
         }
+        this.rl.close();
+    }
+
+    private askUserConfirmation(): Promise<boolean> {
+        return new Promise((resolve) => {
+            process.stdout.write('Approve this action? (y/n): ');
+            this.confirmationQueue.push(resolve);
+        });
     }
 
     private async generatePlan(input: string): Promise<ToolCall[]> {
@@ -112,8 +138,9 @@ export class AgentOrchestrator {
             params: step.args,
             id: id,
             context: {
-                confidence: 0.9,
-                is_user_initiated: true
+                confidence: 0.5, // Lowered to trigger confirmation in tests
+                is_user_initiated: true,
+                mcpd_version: "1.0"
             }
         };
 
@@ -130,9 +157,16 @@ export class AgentOrchestrator {
             if (response.error) {
                 if (response.error.code === -32000) {
                     const token = response.error.data.confirmation_token;
-                    console.log(`Confirmation required for tool. Automatically confirming with token: ${token}`);
+                    const reason = response.error.data.reason;
+                    console.log(`\n⚠️  CONFIRMATION REQUIRED: ${reason}`);
 
-                    // Simulate user confirmation by sending system.confirm
+                    const confirmed = await this.askUserConfirmation();
+                    if (!confirmed) {
+                        throw new Error("User denied confirmation");
+                    }
+
+                    console.log(`Confirming with token: ${token}`);
+
                     const confirmId = Date.now() + Math.random();
                     const confirmRequest = {
                         jsonrpc: "2.0",

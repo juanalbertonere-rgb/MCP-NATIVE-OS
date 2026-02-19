@@ -30,9 +30,10 @@ class LegacyAppBridgeService : AccessibilityService() {
     }
 
     private fun notifyMcpd(tools: List<VirtualTool>) {
-        tools.forEach { tool ->
-            try {
-                val request = """
+        synchronized(this) {
+            tools.forEach { tool ->
+                try {
+                    val request = """
                     {
                         "jsonrpc": "2.0",
                         "method": "system.register_tool",
@@ -47,8 +48,9 @@ class LegacyAppBridgeService : AccessibilityService() {
 
                 socket?.outputStream?.write(request.toByteArray())
                 socket?.outputStream?.flush()
-            } catch (e: Exception) {
-                Log.e("LegacyBridge", "Failed to notify mcpd of tool ${tool.name}: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.e("LegacyBridge", "Failed to notify mcpd of tool ${tool.name}: ${e.message}")
+                    }
             }
         }
     }
