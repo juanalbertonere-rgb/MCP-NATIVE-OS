@@ -4,10 +4,17 @@ import android.app.Service
 import android.content.Intent
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
+import android.os.Binder
 import android.os.IBinder
 import android.util.Log
 
 class McpBridgeService : Service() {
+
+    inner class McpBinder : Binder() {
+        fun getService(): McpBridgeService = this@McpBridgeService
+    }
+
+    private val binder = McpBinder()
 
     override fun onCreate() {
         super.onCreate()
@@ -28,8 +35,33 @@ class McpBridgeService : Service() {
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
+    }
+
+    fun executeIntent(userInput: String) {
+        Log.i("McpService", "Executing intent from UI: $userInput")
+        // In a real implementation, this would send a message to the AgentOrchestrator
+        // For now, we simulate sending a request to mcpd
+        sendRequestToDaemon(userInput)
+    }
+
+    private fun sendRequestToDaemon(input: String) {
+        try {
+            val request = """
+                {
+                    "jsonrpc": "2.0",
+                    "method": "agent.process",
+                    "params": { "input": "$input" },
+                    "id": ${System.currentTimeMillis()},
+                    "context": { "mcpd_version": "1.0" }
+                }
+            """.trimIndent().replace("\n", "") + "\n"
+            socket?.outputStream?.write(request.toByteArray())
+            socket?.outputStream?.flush()
+        } catch (e: Exception) {
+            Log.e("McpService", "Failed to send request: ${e.message}")
+        }
     }
 
     /**

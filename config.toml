@@ -1,0 +1,4 @@
+[security]
+confirmation_ttl_secs = 30
+max_pending_tokens = 100
+allowed_uids = [1001]
