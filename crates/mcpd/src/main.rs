@@ -58,6 +58,7 @@ struct CachedRequest {
 struct McpDaemon {
     registry: Arc<Mutex<ToolRegistry>>,
     cached_requests: Arc<Mutex<BTreeMap<String, CachedRequest>>>,
+    transaction_history: Arc<Mutex<Vec<serde_json::Value>>>,
     config: SecurityConfig,
 }
 
@@ -85,6 +86,7 @@ impl McpDaemon {
         Self {
             registry: Arc::new(Mutex::new(ToolRegistry::load_from_disk())),
             cached_requests: Arc::new(Mutex::new(BTreeMap::new())),
+            transaction_history: Arc::new(Mutex::new(Vec::new())),
             config,
         }
     }
@@ -100,6 +102,24 @@ impl McpDaemon {
         let method = request.method.as_str();
         let params = &request.params;
         let id = request.id.clone();
+
+        if method == "system.list_tools" {
+            let registry = self.registry.lock().await;
+            let tools: Vec<_> = registry.tools.iter()
+                .map(|(name, tool)| serde_json::json!({
+                    "name": name,
+                    "provider": tool.provider,
+                    "risk_level": format!("{:?}", tool.risk_level),
+                    "capabilities": tool.capabilities
+                }))
+                .collect();
+            return JsonRpcResponse::success(id, serde_json::json!(tools));
+        }
+
+        if method == "system.audit_log" {
+            let history = self.transaction_history.lock().await;
+            return JsonRpcResponse::success(id, serde_json::to_value(&*history).unwrap());
+        }
 
         if method == "system.confirm" {
             let token = match params["confirmation_token"].as_str() {
@@ -200,6 +220,15 @@ impl McpDaemon {
             "params": params,
             "result": result
         });
+
+        {
+            let mut history = self.transaction_history.lock().await;
+            history.push(entry.clone());
+            if history.len() > 1000 {
+                history.remove(0);
+            }
+        }
+
         if let Ok(line) = serde_json::to_string(&entry) {
             use std::io::Write;
             // Simple rotation logic

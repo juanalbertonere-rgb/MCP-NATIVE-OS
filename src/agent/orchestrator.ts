@@ -1,10 +1,7 @@
 import * as net from 'net';
 import * as readline from 'readline';
-
-interface ToolCall {
-    tool: string;
-    args: any;
-}
+import { AgentPlanner, Tool, ToolCall } from './planner.js';
+import { MemoryStore } from './memory.js';
 
 export class AgentOrchestrator {
     private client: net.Socket | null = null;
@@ -12,8 +9,12 @@ export class AgentOrchestrator {
     private buffer: string = '';
     private rl: readline.Interface;
     private confirmationQueue: ((answer: boolean) => void)[] = [];
+    private planner: AgentPlanner;
+    private memory: MemoryStore;
 
     constructor() {
+        this.planner = new AgentPlanner();
+        this.memory = new MemoryStore();
         this.rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout,
@@ -95,13 +96,54 @@ export class AgentOrchestrator {
     async processIntent(userInput: string) {
         console.log(`Processing intent: ${userInput}`);
 
-        // 1. Plan
-        const plan = await this.generatePlan(userInput);
+        // 1. Fetch registry
+        const tools = await this.listTools();
 
-        // 2. Execute
-        for (const step of plan) {
-            await this.executeStep(step);
+        // 2. Plan
+        const plan = await this.planner.plan(userInput, tools);
+
+        // 3. Execute
+        for (let i = 0; i < plan.length; i++) {
+            await this.executeStep(plan[i], i + 1, plan.length);
         }
+    }
+
+    async listTools(): Promise<Tool[]> {
+        const id = Date.now() + Math.random();
+        const request = {
+            jsonrpc: "2.0",
+            method: "system.list_tools",
+            params: {},
+            id: id
+        };
+        const response = await this.sendRequest(request);
+        if (response.error) {
+            throw new Error(`Failed to list tools: ${JSON.stringify(response.error)}`);
+        }
+        return response.result;
+    }
+
+    async getAuditLog(): Promise<any[]> {
+        const id = Date.now() + Math.random();
+        const request = {
+            jsonrpc: "2.0",
+            method: "system.audit_log",
+            params: {},
+            id: id
+        };
+        const response = await this.sendRequest(request);
+        if (response.error) {
+            throw new Error(`Failed to fetch audit log: ${JSON.stringify(response.error)}`);
+        }
+        return response.result;
+    }
+
+    private async sendRequest(request: any): Promise<any> {
+        const client = await this.getClient();
+        return new Promise<any>((resolve, reject) => {
+            this.pendingRequests.set(request.id, { resolve, reject });
+            client.write(JSON.stringify(request) + '\n');
+        });
     }
 
     async shutdown() {
@@ -119,78 +161,98 @@ export class AgentOrchestrator {
         });
     }
 
-    private async generatePlan(input: string): Promise<ToolCall[]> {
-        // Simulated LLM planning
-        return [
-            { tool: "camera.capture", args: {} },
-            { tool: "contacts.resolve", args: { query: "Mom" } },
-            { tool: "messages.send", args: { text: "Here is the photo" } }
-        ];
+    private async executeStep(step: ToolCall, stepIndex: number, totalSteps: number) {
+        console.log(`[${stepIndex}/${totalSteps}] Executing: ${step.tool}`);
+
+        // Enrich args from memory
+        const enrichedArgs = { ...step.args };
+        if (step.tool === "messages.send") {
+            const contact = this.memory.get("last_resolved_contact");
+            const photo = this.memory.get("last_captured_image");
+            if (contact) {
+                enrichedArgs.recipient = contact.phone;
+            }
+            if (photo) {
+                enrichedArgs.attachment = photo.image_url;
+            }
+        }
+
+        let retries = 2;
+        while (retries >= 0) {
+            try {
+                const id = Date.now() + Math.random();
+                const mcpRequest = {
+                    jsonrpc: "2.0",
+                    method: step.tool,
+                    params: enrichedArgs,
+                    id: id,
+                    context: {
+                        confidence: 0.5, // Lowered to trigger confirmation in tests
+                        is_user_initiated: true,
+                        mcpd_version: "1.0"
+                    }
+                };
+
+                console.log(`Sending MCP Request to mcpd: ${JSON.stringify(mcpRequest)}`);
+
+                const client = await this.getClient();
+                const response = await this.sendRequest(mcpRequest);
+
+                console.log(`Tool Result: ${JSON.stringify(response)}`);
+                if (response.error) {
+                    if (response.error.code === -32000 && response.error.data?.confirmation_token) {
+                        const token = response.error.data.confirmation_token;
+                        const reason = response.error.data.reason;
+                        console.log(`\n⚠️  CONFIRMATION REQUIRED: ${reason}`);
+
+                        const confirmed = await this.askUserConfirmation();
+                        if (!confirmed) {
+                            throw new Error("User denied confirmation");
+                        }
+
+                        console.log(`Confirming with token: ${token}`);
+
+                        const confirmId = Date.now() + Math.random();
+                        const confirmRequest = {
+                            jsonrpc: "2.0",
+                            method: "system.confirm",
+                            params: { confirmation_token: token },
+                            id: confirmId
+                        };
+
+                        const confirmResponse = await this.sendRequest(confirmRequest);
+
+                        console.log(`Confirmation Result: ${JSON.stringify(confirmResponse)}`);
+                        if (confirmResponse.error) {
+                            throw new Error(`MCP Confirmation Error: ${JSON.stringify(confirmResponse.error)}`);
+                        }
+                        // After confirmation, we store the original response if it was actually executed
+                        // In our current mcpd it returns success immediately after system.confirm
+                        this.storeResultInMemory(step.tool, confirmResponse.result);
+                        return;
+                    }
+                    throw new Error(`MCP Error: ${JSON.stringify(response.error)}`);
+                }
+
+                this.storeResultInMemory(step.tool, response.result);
+                return; // Success
+            } catch (err) {
+                if (retries === 0) {
+                    console.error(`FATAL: Tool ${step.tool} failed after retries`);
+                    throw err;
+                }
+                retries--;
+                console.warn(`Retrying ${step.tool}... (${retries + 1} left)`);
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
     }
 
-    private async executeStep(step: ToolCall) {
-        console.log(`Executing tool: ${step.tool}`);
-
-        const id = Date.now() + Math.random();
-        const mcpRequest = {
-            jsonrpc: "2.0",
-            method: step.tool,
-            params: step.args,
-            id: id,
-            context: {
-                confidence: 0.5, // Lowered to trigger confirmation in tests
-                is_user_initiated: true,
-                mcpd_version: "1.0"
-            }
-        };
-
-        console.log(`Sending MCP Request to mcpd: ${JSON.stringify(mcpRequest)}`);
-
-        try {
-            const client = await this.getClient();
-            const response = await new Promise<any>((resolve, reject) => {
-                this.pendingRequests.set(id, { resolve, reject });
-                client.write(JSON.stringify(mcpRequest) + '\n');
-            });
-
-            console.log(`Tool Result: ${JSON.stringify(response)}`);
-            if (response.error) {
-                if (response.error.code === -32000) {
-                    const token = response.error.data.confirmation_token;
-                    const reason = response.error.data.reason;
-                    console.log(`\n⚠️  CONFIRMATION REQUIRED: ${reason}`);
-
-                    const confirmed = await this.askUserConfirmation();
-                    if (!confirmed) {
-                        throw new Error("User denied confirmation");
-                    }
-
-                    console.log(`Confirming with token: ${token}`);
-
-                    const confirmId = Date.now() + Math.random();
-                    const confirmRequest = {
-                        jsonrpc: "2.0",
-                        method: "system.confirm",
-                        params: { confirmation_token: token },
-                        id: confirmId
-                    };
-
-                    const confirmResponse = await new Promise<any>((resolve, reject) => {
-                        this.pendingRequests.set(confirmId, { resolve, reject });
-                        client.write(JSON.stringify(confirmRequest) + '\n');
-                    });
-
-                    console.log(`Confirmation Result: ${JSON.stringify(confirmResponse)}`);
-                    if (confirmResponse.error) {
-                        throw new Error(`MCP Confirmation Error: ${JSON.stringify(confirmResponse.error)}`);
-                    }
-                    return; // Success after confirmation
-                }
-                throw new Error(`MCP Error: ${JSON.stringify(response.error)}`);
-            }
-        } catch (err) {
-            console.error(`Step failed: ${err}`);
-            throw err;
+    private storeResultInMemory(tool: string, result: any) {
+        if (tool === "camera.capture") {
+            this.memory.set("last_captured_image", result);
+        } else if (tool === "contacts.resolve") {
+            this.memory.set("last_resolved_contact", result.contact);
         }
     }
 }

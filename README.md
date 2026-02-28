@@ -6,9 +6,21 @@ An agent-first mobile operating system where AI agents are first-class citizens 
 **Phase**: Architecture & Scaffolding (In Progress)
 
 ## Quick Start
-1.  Read the [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) to understand the system design.
-2.  Explore the [System Daemon Specs](docs/system/README.md) for the core `mcpd` implementation details.
-3.  Check the [Roadmap](docs/roadmap/PHASED_ROADMAP.md) for current development status.
+1. `cargo build && ./verify_e2e.sh`
+2. Si pasa: Sistema funciona end-to-end
+3. Ver logs en `mcpd.log`, `test_output.log`
+
+## Architecture Now
+- **mcpd**: Tool registry + RPC broker + audit log
+- **Planner**: Heurístico (intent → tool sequence)
+- **Executor**: Con retry + memory pass-through
+- **Test**: Validación real del flujo completo
+
+## Documentation
+- [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)
+- [System Daemon Specs](docs/system/README.md)
+- [Roadmap](docs/roadmap/PHASED_ROADMAP.md)
+- [Implementation Status](IMPLEMENTATION_STATUS.md)
 
 ## Core Stack
 *   **OS Base**: Android (AOSP)
